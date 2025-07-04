@@ -65,6 +65,7 @@ class TelegramClickContext:
         self.current_param_index: int = 0
         self.required_params: List[click.Parameter] = []
         self.command_name: str = ""
+        self.waiting_for_input: bool = False
 
 
 @dataclass

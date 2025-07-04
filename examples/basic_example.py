@@ -135,6 +135,41 @@ def convert_temp(from_unit: str, to_unit: str, temperature: float):
     
     return f"🌡️ 溫度轉換：\n{temperature}°{from_unit[0].upper()} = {result:.2f}{unit_symbol}"
 
+@my_tools.command()
+@click.option('--name', required=True, help='您的姓名')
+@click.option('--nickname', help='您的暱稱（可選）')
+@click.option('--age', type=int, help='您的年齡（可選）')
+@click.option('--city', default='台北', help='您的城市')
+@click.option('--show-details', is_flag=True, help='顯示詳細信息')
+def profile(name: str, nickname: str = None, age: int = None, city: str = '台北', show_details: bool = False):
+    """個人資料測試命令
+    
+    這個命令展示了可選參數的各種處理方式：
+    - 必需參數：name
+    - 可選參數無默認值：nickname
+    - 可選參數有默認值：city
+    - 可選數字參數：age
+    - 可選布林參數：show-details
+    """
+    result = f"👤 **個人資料**\n"
+    result += f"姓名：{name}\n"
+    
+    if nickname:
+        result += f"暱稱：{nickname}\n"
+    
+    if age:
+        result += f"年齡：{age}歲\n"
+    
+    result += f"城市：{city}\n"
+    
+    if show_details:
+        result += "\n📋 **詳細信息**\n"
+        result += f"- 參數處理測試成功\n"
+        result += f"- 可選參數靈活處理\n"
+        result += f"- 支持三種選擇模式\n"
+    
+    return result
+
 def main():
     """主程序入口"""
     if not os.getenv("TELEGRAM_TOKEN"):

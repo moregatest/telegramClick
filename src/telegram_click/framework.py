@@ -180,19 +180,26 @@ class ClickToTelegramConverter:
         context = self.user_contexts[user_id]
         command = self.click_commands[context.command_name]
         
-        # 獲取所有需要的參數
+        # 分離必需和可選參數
         required_params = []
+        optional_params = []
         if hasattr(command, 'params'):
             for param in command.params:
                 if isinstance(param, (click.Option, click.Argument)):
-                    required_params.append(param)
+                    if param.required:
+                        required_params.append(param)
+                    else:
+                        optional_params.append(param)
         
-        if not required_params:
+        # 將所有參數合併，但保留分離信息
+        all_params = required_params + optional_params
+        
+        if not all_params:
             # 沒有參數，直接執行
             await self._execute_click_command(user_id)
             return
         
-        context.required_params = required_params
+        context.required_params = all_params
         await self._collect_next_parameter(user_id)
     
     async def _collect_next_parameter(self, user_id: int):
@@ -239,22 +246,43 @@ class ClickToTelegramConverter:
         """顯示布林參數"""
         context = self.user_contexts[user_id]
         
-        keyboard = [
-            [
+        # 如果是可選參數，提供三選一界面
+        if not param.required:
+            keyboard = []
+            
+            # 是/否選項
+            keyboard.append([
                 InlineKeyboardButton("✅ 是", callback_data=f"param:{param.name}:true"),
                 InlineKeyboardButton("❌ 否", callback_data=f"param:{param.name}:false")
+            ])
+            
+            # 使用默認值按鈕（如果有默認值）
+            if param.default is not None:
+                default_text = "是" if param.default else "否"
+                keyboard.append([InlineKeyboardButton(f"📋 使用默認值 ({default_text})", callback_data=f"default:{param.name}")])
+            
+            # 跳過按鈕
+            keyboard.append([InlineKeyboardButton("⏭️ 跳過", callback_data=f"skip:{param.name}")])
+            
+            param_desc = param.help or f"設置 {param.name}"
+            message = f"🔸 {param.name} (可選)\n{param_desc}\n\n請選擇："
+        else:
+            # 必需參數，只提供是/否選項
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ 是", callback_data=f"param:{param.name}:true"),
+                    InlineKeyboardButton("❌ 否", callback_data=f"param:{param.name}:false")
+                ]
             ]
-        ]
+            
+            param_desc = param.help or f"設置 {param.name}"
+            message = f"🔸 {param.name} (必需)\n{param_desc}\n\n請選擇："
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        param_desc = param.help or f"設置 {param.name}"
-        message = f"🔸 **{param.name}**\n{param_desc}\n\n請選擇："
-        
         await context.update.effective_chat.send_message(
             message,
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
+            reply_markup=reply_markup
         )
     
     async def _show_text_parameter(self, user_id: int, param: click.Parameter):
@@ -268,19 +296,47 @@ class ClickToTelegramConverter:
             param_type_hint = "檔案"
         
         param_desc = param.help or f"請輸入 {param.name}"
-        # 避免 Markdown 解析問題，使用純文字格式
-        message = f"🔸 {param.name}\n{param_desc}\n\n請輸入{param_type_hint}："
         
-        await context.update.effective_chat.send_message(
-            message
-        )
+        # 如果是可選參數，提供選項按鈕
+        if not param.required:
+            keyboard = []
+            
+            # 輸入自定義值按鈕
+            keyboard.append([InlineKeyboardButton("✏️ 輸入自定義值", callback_data=f"input:{param.name}")])
+            
+            # 使用默認值按鈕（如果有默認值）
+            if param.default is not None:
+                default_text = str(param.default)[:20] + ("..." if len(str(param.default)) > 20 else "")
+                keyboard.append([InlineKeyboardButton(f"📋 使用默認值 ({default_text})", callback_data=f"default:{param.name}")])
+            
+            # 跳過按鈕
+            keyboard.append([InlineKeyboardButton("⏭️ 跳過", callback_data=f"skip:{param.name}")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            message = f"🔸 **{param.name}** (可選)\n{param_desc}\n\n請選擇："
+            
+            await context.update.effective_chat.send_message(
+                message,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            # 必需參數，直接要求輸入
+            message = f"🔸 **{param.name}** (必需)\n{param_desc}\n\n請輸入{param_type_hint}："
+            await context.update.effective_chat.send_message(
+                message,
+                parse_mode=ParseMode.MARKDOWN
+            )
     
     async def _handle_callback(self, update: Update, context):
         """處理按鈕回調"""
         query = update.callback_query
         await query.answer()
         
-        if query.data.startswith("param:"):
+        if (query.data.startswith("param:") or 
+            query.data.startswith("input:") or 
+            query.data.startswith("default:") or 
+            query.data.startswith("skip:")):
             await self._handle_parameter_callback(query)
     
     async def _handle_parameter_callback(self, query):
@@ -291,25 +347,52 @@ class ClickToTelegramConverter:
             await query.edit_message_text("❌ 會話已過期，請重新開始")
             return
         
-        try:
-            _, param_name, value = query.data.split(":", 2)
-        except ValueError:
-            await query.edit_message_text("❌ 無效的回調數據")
-            return
-        
         context = self.user_contexts[user_id]
+        callback_data = query.data
         
-        # 轉換值
-        if value == "true":
-            value = True
-        elif value == "false":
-            value = False
-        
-        context.collected_params[param_name] = value
-        context.current_param_index += 1
-        
-        await query.edit_message_text(f"✅ {param_name} = {value}")
-        await self._collect_next_parameter(user_id)
+        if callback_data.startswith("input:"):
+            # 用戶選擇輸入自定義值
+            param_name = callback_data.split(":", 1)[1]
+            await query.edit_message_text(f"✏️ 請輸入 {param_name} 的值：")
+            # 設置狀態等待用戶輸入
+            context.waiting_for_input = True
+            
+        elif callback_data.startswith("default:"):
+            # 用戶選擇使用默認值
+            param_name = callback_data.split(":", 1)[1]
+            param = context.required_params[context.current_param_index]
+            context.collected_params[param_name] = param.default
+            context.current_param_index += 1
+            await query.edit_message_text(f"📋 {param_name} = {param.default} (默認值)")
+            await self._collect_next_parameter(user_id)
+            
+        elif callback_data.startswith("skip:"):
+            # 用戶選擇跳過
+            param_name = callback_data.split(":", 1)[1]
+            context.collected_params[param_name] = None
+            context.current_param_index += 1
+            await query.edit_message_text(f"⏭️ 跳過 {param_name}")
+            await self._collect_next_parameter(user_id)
+            
+        elif callback_data.startswith("param:"):
+            # 處理原有的選擇和布林參數回調
+            try:
+                _, param_name, value = callback_data.split(":", 2)
+            except ValueError:
+                await query.edit_message_text("❌ 無效的回調數據")
+                return
+            
+            # 轉換值
+            if value == "true":
+                value = True
+            elif value == "false":
+                value = False
+            
+            context.collected_params[param_name] = value
+            context.current_param_index += 1
+            
+            await query.edit_message_text(f"✅ {param_name} = {value}")
+            await self._collect_next_parameter(user_id)
     
     async def _handle_text(self, update: Update, context):
         """處理文字輸入"""
@@ -324,17 +407,32 @@ class ClickToTelegramConverter:
         if user_context.current_param_index < len(required_params):
             param = required_params[user_context.current_param_index]
             
-            # 驗證和轉換輸入
-            result = validate_and_convert_parameter_value(update.message.text, param)
-            
-            if result.success:
-                user_context.collected_params[param.name] = result.data
-                user_context.current_param_index += 1
+            # 檢查是否正在等待輸入（可選參數選擇了輸入自定義值）
+            if user_context.waiting_for_input:
+                # 驗證和轉換輸入
+                result = validate_and_convert_parameter_value(update.message.text, param)
                 
-                await update.message.reply_text(f"✅ {param.name} = {result.data}")
-                await self._collect_next_parameter(user_id)
-            else:
-                await update.message.reply_text(f"❌ {result.message}")
+                if result.success:
+                    user_context.collected_params[param.name] = result.data
+                    user_context.current_param_index += 1
+                    user_context.waiting_for_input = False
+                    
+                    await update.message.reply_text(f"✅ {param.name} = {result.data}")
+                    await self._collect_next_parameter(user_id)
+                else:
+                    await update.message.reply_text(f"❌ {result.message}")
+            elif param.required:
+                # 必需參數的直接輸入
+                result = validate_and_convert_parameter_value(update.message.text, param)
+                
+                if result.success:
+                    user_context.collected_params[param.name] = result.data
+                    user_context.current_param_index += 1
+                    
+                    await update.message.reply_text(f"✅ {param.name} = {result.data}")
+                    await self._collect_next_parameter(user_id)
+                else:
+                    await update.message.reply_text(f"❌ {result.message}")
     
     async def _execute_click_command(self, user_id: int):
         """執行Click命令"""
