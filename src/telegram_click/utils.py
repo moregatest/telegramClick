@@ -5,8 +5,10 @@ TelegramClick工具函數模組
 import inspect
 import logging
 import importlib.util
+import contextlib
 from pathlib import Path
 from typing import Any, Optional, Dict, List
+from io import StringIO
 import click
 
 from .types import ParameterType, TelegramParameter, ConversionResult
@@ -116,7 +118,11 @@ def format_output_message(result: Any, max_length: int = 4000) -> str:
     if result is None:
         return "✅ 命令執行完成"
     
-    output = str(result)
+    output = str(result).strip()
+    
+    # 如果沒有輸出內容，返回執行完成訊息
+    if not output:
+        return "✅ 命令執行完成"
     
     if len(output) > max_length:
         output = output[:max_length-50] + "\n\n... (輸出過長，已截斷)"
@@ -174,14 +180,42 @@ def should_include_command(name: str, whitelist: List[str], blacklist: List[str]
 
 
 async def safe_call_function(func: Any, params: Dict[str, Any]) -> ConversionResult:
-    """安全地調用函數（支援同步和異步）"""
+    """安全地調用函數（支援同步和異步），並捕獲標準輸出"""
     try:
-        if inspect.iscoroutinefunction(func):
-            result = await func(**params)
-        else:
-            result = func(**params)
+        # 使用 StringIO 捕獲標準輸出和錯誤輸出
+        stdout_capture = StringIO()
+        stderr_capture = StringIO()
         
-        return ConversionResult(success=True, data=result)
+        with contextlib.redirect_stdout(stdout_capture), \
+             contextlib.redirect_stderr(stderr_capture):
+            
+            if inspect.iscoroutinefunction(func):
+                result = await func(**params)
+            else:
+                result = func(**params)
+        
+        # 獲取捕獲的輸出
+        stdout_output = stdout_capture.getvalue()
+        stderr_output = stderr_capture.getvalue()
+        
+        # 合併輸出和返回值
+        combined_output = ""
+        if stdout_output:
+            combined_output += stdout_output
+        if stderr_output:
+            combined_output += stderr_output
+        
+        # 如果有標準輸出，優先返回合併的輸出；否則返回原始結果
+        if combined_output:
+            # 如果函數也有返回值，將其附加到輸出
+            if result is not None:
+                combined_output += str(result)
+            final_result = combined_output
+        else:
+            # 沒有標準輸出時，直接返回原始結果
+            final_result = result
+        
+        return ConversionResult(success=True, data=final_result)
         
     except Exception as e:
         logger.error(f"函數調用失敗: {e}")

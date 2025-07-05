@@ -45,12 +45,14 @@ def echo(text: str, times: int, uppercase: bool):
     重複輸出指定的文字。
     """
     output_text = text.upper() if uppercase else text
-    result = []
     
+    # 使用 click.echo 輸出到標準輸出
+    click.echo("🔊 Echo 結果：")
     for i in range(times):
-        result.append(f"{i+1}. {output_text}")
+        click.echo(f"{i+1}. {output_text}")
     
-    return "🔊 Echo 結果：\n" + "\n".join(result)
+    # 也可以返回值
+    return f"✅ 完成輸出 {times} 次"
 
 @my_tools.command()
 @click.option('--operation', 
@@ -89,6 +91,10 @@ def text_process(message: str, action: str):
     
     對文字執行各種處理操作。
     """
+    # 使用 click.echo 輸出處理過程
+    click.echo(f"📝 正在處理訊息: {message}")
+    click.echo(f"🔧 執行動作: {action}")
+    
     actions = {
         'count': f"📏 字符數量：{len(message)}",
         'reverse': f"🔄 反轉結果：{message[::-1]}",
@@ -97,7 +103,9 @@ def text_process(message: str, action: str):
         'lower': f"🔡 小寫結果：{message.lower()}"
     }
     
-    return actions[action]
+    result = actions[action]
+    click.echo(f"✅ 處理完成")
+    return result
 
 @my_tools.command()
 @click.option('--from-unit',
@@ -151,6 +159,10 @@ def profile(name: str, nickname: str = None, age: int = None, city: str = '台�
     - 可選數字參數：age
     - 可選布林參數：show-details
     """
+    # 使用 click.echo 輸出處理過程
+    click.echo("📊 正在建立個人資料...")
+    print(f"🔍 接收到的參數: name={name}, nickname={nickname}, age={age}, city={city}")
+    
     result = f"👤 **個人資料**\n"
     result += f"姓名：{name}\n"
     
@@ -167,6 +179,9 @@ def profile(name: str, nickname: str = None, age: int = None, city: str = '台�
         result += f"- 參數處理測試成功\n"
         result += f"- 可選參數靈活處理\n"
         result += f"- 支持三種選擇模式\n"
+    
+    # 使用 click.echo 輸出完成信息
+    click.echo("✅ 個人資料建立完成")
     
     return result
 
